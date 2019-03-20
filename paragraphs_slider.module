@@ -1,0 +1,336 @@
+<?php
+
+define('PS_PARAGRAPH_TYPE', 'paragraphs_item');
+define('PS_FIELD_TITLE', 'ps_title');
+define('PS_FIELD_BODY', 'ps_body');
+define('PS_FIELD_IMAGE', 'ps_image');
+define('PS_FIELD_PARAGRAPHS', 'ps_paragraphs');
+define('PS_BUNDLE_CONTENT', 'paragraphs_slider_content');
+
+function paragraphs_slider_menu() { 
+  $items['node/%node/slider'] = array(
+    'page callback' => 'paragraphs_slider_endpoint',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+  );
+  return $items;
+}
+
+function paragraphs_slider_endpoint($node) {
+	$data = paragraphs_slider_get_paragraphs_items($node);
+  drupal_json_output($data);
+}
+
+function paragraphs_slider_get_paragraphs_items($node){
+	$exist_slider_in_node = paragraphs_slider_check_if_exist_slider_in_node($node);
+	if($exist_slider_in_node){
+		foreach($node->$exist_slider_in_node["und"] as $individual_item){
+			$entities[] = entity_load('paragraphs_item', array($individual_item["value"]));
+		}
+
+    foreach($entities as $keyE => $individual_paragraph){
+    	foreach($individual_paragraph as $keyP => $individual_paragraphInn){
+				foreach($individual_paragraphInn->ps_paragraphs["und"] as $keyIp => $individual_paragraphInnInn){
+					$entitiesInn[$keyP][] = entity_load('paragraphs_item', array($individual_paragraphInnInn["value"]));
+				}
+    	}
+    }		
+	
+    foreach($entitiesInn as $keyContainerP => $entitiesInnInn){
+	    foreach($entitiesInnInn as $keyParagraph => $itemsParagraph){
+    		foreach($itemsParagraph as $FinalItemsParagraph){
+					$data["data"][$keyContainerP][] = array(
+						'title' => $FinalItemsParagraph->ps_title["und"][0]["value"], 
+						'body' => $FinalItemsParagraph->ps_body["und"][0]["value"], 
+						'image' => file_create_url($FinalItemsParagraph->ps_image["und"][0]["uri"])
+					);
+				}
+	    }
+    }
+
+		return $data;
+	}else{
+		return false;
+	}	
+}
+
+function paragraphs_slider_check_if_exist_slider_in_node($node){
+	$fields = field_info_instances('node', $node->type);
+	foreach($fields as $name_field => $field){
+		if(isset($field["settings"]["allowed_bundles"]["slider_container"]) && $field["settings"]["allowed_bundles"]["slider_container"] == 'slider_container'){
+			return $name_field;
+		}
+	}
+	return false;
+}
+
+function paragraphs_slider_theme_registry_alter(&$theme_registry) {
+  $module_path = drupal_get_path('module', 'paragraphs_slider');
+  $template_file_objects = drupal_find_theme_templates($theme_registry, '.tpl.php', $module_path);
+  foreach ($template_file_objects as $key => $template_file_object) {
+    if (!isset($theme_registry[$key]['theme path']) || !preg_match('#/themes/#', $theme_registry[$key]['theme path'])) {
+      $theme_registry[$key]['theme path'] = $module_path;
+      $theme_registry[$key] = array_merge($theme_registry[$key], $template_file_object);
+      $theme_registry[$key]['type'] = 'module';
+    }
+  }
+}
+
+function paragraphs_slider_preprocess_entity(&$variables) {
+  if ($variables['entity_type'] == 'paragraphs_item' && $variables['elements']['#bundle'] == 'slider_container') {
+    global $base_url;
+
+  	$node = menu_get_object();
+  	$url = $base_url . '/node/' . $node->nid . '/slider';
+		$request = drupal_http_request($url);
+		$json_response = drupal_json_decode($request->data);
+
+		$item_id = $variables["elements"]["ps_paragraphs"]["#object"]->item_id;    
+		$data["data"] = $json_response["data"][$item_id];
+    $variables['paragraphs_slider'] = $data;
+  }
+}
+
+function paragraphs_slider_preprocess_page(&$variables){
+  if(isset($variables['node']) && arg(2) != 'edit'){
+		drupal_add_css(drupal_get_path('module', 'paragraphs_slider') . '/css/slider-style.css', array('group' => CSS_DEFAULT));
+		drupal_add_css(drupal_get_path('module', 'paragraphs_slider') . '/js/slick/slick/slick.css', array('group' => CSS_DEFAULT));
+		drupal_add_css(drupal_get_path('module', 'paragraphs_slider') . '/js/slick/slick/slick-theme.css', array('group' => CSS_DEFAULT));
+		drupal_add_js('https://code.jquery.com/jquery-1.12.1.min.js', array('type' => 'external'));
+		drupal_add_js('https://code.jquery.com/jquery-migrate-1.2.1.min.js', array('type' => 'external'));
+		drupal_add_js(drupal_get_path('module', 'paragraphs_slider') . '/js/slick/slick/slick.min.js');
+		drupal_add_js('jQuery(document).ready(function(){
+	  		jQuery(".home-slider").slick({
+	  			arrows: true,
+	  			dots: true,
+				responsive: [
+					{
+						breakpoint: 900,
+							settings: {
+								dots:false
+						}
+					}
+				]
+	  		});
+		});', 'inline');
+  }
+}
+
+
+function paragraphs_slider_create_paragraph($machine_name, $name) {
+  $bundle = new stdClass();
+  $bundle->bundle = $machine_name;
+  $bundle->name = $name;
+  $bundle->locked = 1;
+
+  $status = paragraphs_bundle_save($bundle);
+  $t = get_t();
+  $t_args = array('%name' => $bundle->name);
+
+  if ($status == SAVED_NEW) {
+    drupal_set_message($t('The paragraph bundle %name has been added.', $t_args));
+    watchdog('paragraphs_slider', 'Added paragraph bundle %name.', $t_args, WATCHDOG_NOTICE, l(t('view'), 'admin/structure/paragraphs'));
+  }
+  elseif ($status == SAVED_UPDATED) {
+    drupal_set_message(t('The paragraph bundle %name has been updated.', $t_args));
+  }
+  else {
+    drupal_set_message($t('The paragraph bundle %name couldn\'t been saved.', $t_args), 'warning');
+    watchdog('paragraphs_slider', 'The paragraph bundle %name couldn\'t been saved.', $t_args, WATCHDOG_WARNING, l(t('view'), 'admin/structure/paragraphs'));
+  }
+}
+
+function paragraphs_slider_add_field_image($bundle, $field_label, $settings = array()) {
+  $field = paragraphs_slider_get_field_image();
+
+  // Default settings with all possible options.
+  $settings_default = array(
+    //'file_extensions' => 'png jpg',
+    // 'max_filesize' => '50 MB',
+    // 'file_directory' => 'optional_file_directory',
+    // 'description_field' => 0,
+    // 'user_register_form' => FALSE,
+  );
+
+  // Add default settings if some options are missing
+  $settings += $settings_default;
+
+  $instance = _paragraphs_slider_add_field(array(
+    'field_name' => $field['field_name'],
+    'entity_type' => PS_PARAGRAPH_TYPE,
+    'bundle' => $bundle,
+    'label' => $field_label,
+    'required' => TRUE,
+    'settings' => $settings,
+  ));
+
+  return $instance;
+}
+
+function paragraphs_slider_get_field_image($uri_scheme = '') {
+  $field = _paragraphs_slider_get_field(array(
+    'field_name' => PS_FIELD_IMAGE,
+    'type' => 'image',
+    'entity_types' => array(PS_PARAGRAPH_TYPE),
+    'cardinality' => 1,
+    'settings' => array(
+      'uri_scheme' => variable_get('file_default_scheme', 'public'),
+    ),
+  ));
+
+  if (!empty($uri_scheme)) {
+    $field['settings']['uri_scheme'] = $uri_scheme;
+  }
+
+  return $field;
+}
+
+function paragraphs_slider_add_field_title($bundle, $field_label) {
+  $field = paragraphs_slider_get_field_title();
+
+  $instance = _paragraphs_slider_add_field(array(
+    'field_name' => $field['field_name'],
+    'entity_type' => PS_PARAGRAPH_TYPE,
+    'bundle' => $bundle,
+    'label' => $field_label,
+    'widget' => array('type' => 'text_textfield'),
+    'settings' => array(
+      'text_processing' => 0,
+      'user_register_form' => FALSE,
+    ),
+    'display' => array(
+      'default' => array(
+        'label' => 'hidden',
+        'module' => 'text',
+        'settings' => array(),
+        'type' => 'text_default',
+      ),
+      'paragraphs_editor_preview' => array(
+        'label' => 'hidden',
+        'module' => 'text',
+        'settings' => array(),
+        'type' => 'text_default',
+      ),
+    ),
+  ));
+
+  return $instance;
+}
+
+function paragraphs_slider_get_field_title() {
+  $field = _paragraphs_slider_get_field(array(
+    'field_name' => PS_FIELD_TITLE,
+    'type' => 'text',
+    'entity_types' => array(PS_PARAGRAPH_TYPE),
+  ));
+
+  return $field;
+}
+
+function paragraphs_slider_form_alter(&$form, $form_state, $form_id) {
+    //dpm($form);
+}
+
+function paragraphs_slider_add_field_paragraphs($bundle, $field_label) {
+  $field = paragraphs_slider_get_field_paragraphs();
+
+  $instance = _paragraphs_slider_add_field(array(
+    'field_name' => $field['field_name'],
+    'entity_type' => PS_PARAGRAPH_TYPE,
+    'bundle' => $bundle,
+    'label' => $field_label,
+    'widget' => array(
+    	'type' => 'paragraphs_embed'
+    ),
+    'settings' => array(
+    	'allowed_bundles' => array(
+    		'paragraphs_slider' => 'paragraphs_slider'
+    	)
+    ),
+    'display' => array(
+      'default' => array(
+        'label' => 'paragraphs_embed',
+      ),
+      'paragraphs_editor_preview' => array(
+        'label' => 'paragraphs_embed',
+      ),
+    ),    
+  ));
+
+  return $instance;
+}
+
+function paragraphs_slider_get_field_paragraphs() {
+  $field = _paragraphs_slider_get_field(array(
+    'field_name' => PS_FIELD_PARAGRAPHS,
+    'type' => 'paragraphs',
+    'entity_types' => array(PS_PARAGRAPH_TYPE),
+    'cardinality' => -1,    
+  ));
+
+  return $field;
+}
+
+
+function paragraphs_slider_add_field_body($bundle, $field_label) {
+  $field = paragraphs_slider_get_field_body();
+
+  $instance = _paragraphs_slider_add_field(array(
+    'field_name' => $field['field_name'],
+    'entity_type' => PS_PARAGRAPH_TYPE,
+    'bundle' => $bundle,
+    'label' => $field_label,
+    'widget' => array(
+      'module' => 'text',
+      'settings' => array(
+        'rows' => 5,
+      ),
+      'type' => 'text_textarea',
+    ),
+    'settings' => array('display_summary' => TRUE),
+    'display' => array(
+      'default' => array(
+        'label' => 'hidden',
+        'module' => 'text',
+        'settings' => array(),
+        'type' => 'text_default',
+      ),
+      'paragraphs_editor_preview' => array(
+        'label' => 'hidden',
+        'module' => 'text',
+        'settings' => array(),
+        'type' => 'text_default',
+      ),
+    ),
+  ));
+
+  return $instance;
+}
+
+function paragraphs_slider_get_field_body() {
+  $field = _paragraphs_slider_get_field(array(
+    'field_name' => PS_FIELD_BODY,
+    'type' => 'text_long',
+    'entity_types' => array(PS_PARAGRAPH_TYPE),
+  ));
+
+  return $field;
+}
+
+function _paragraphs_slider_get_field($field) {
+  $field_info = field_info_field($field['field_name']);
+  if (empty($field_info)) {
+    $field_info = field_create_field($field);
+  }
+
+  return $field_info;
+}
+
+function _paragraphs_slider_add_field($instance) {
+  $instance_info = field_info_instance(PS_PARAGRAPH_TYPE, $instance['field_name'], $instance['bundle']);
+  if (empty($instance_info)) {
+    field_create_instance($instance);
+  }
+
+  return $instance_info;
+}

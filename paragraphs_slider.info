@@ -1,0 +1,6 @@
+name = Paragraphs slider
+description = Paragraphs slider.
+core = 7.x
+package = Paragraphs
+
+dependencies[] = paragraphs

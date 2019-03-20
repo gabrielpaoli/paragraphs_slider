@@ -1,0 +1,35 @@
+<?php
+
+function paragraphs_slider_install() {
+  field_info_cache_clear();
+  paragraphs_slider_create_paragraph('paragraphs_slider', 'Slider');
+  paragraphs_slider_add_field_title('paragraphs_slider', 'slider_title');
+  paragraphs_slider_add_field_body('paragraphs_slider', 'slider_body');
+  paragraphs_slider_add_field_image('paragraphs_slider', 'slider_image');
+
+  paragraphs_slider_create_paragraph('slider_container', 'Slider container');
+  paragraphs_slider_add_field_paragraphs('slider_container', 'slider_paragraphs');
+}
+
+function paragraphs_slider_field_schema($field) {
+  $columns = array();
+
+  switch ($field['type']) {
+    case 'ps_view_mode':
+      $columns = array(
+        'value' => array(
+          'type' => 'varchar',
+          'length' => 255,
+          'not null' => FALSE,
+        ),
+      );
+      break;
+  }
+
+  return array(
+    'columns' => $columns,
+    'indexes' => array(
+      'value' => array('value'),
+    ),
+  );
+}
